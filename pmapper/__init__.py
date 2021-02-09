@@ -25,7 +25,7 @@ class PMAP:
     Implements Ref [1], Eq. 2.16.
     """
 
-    def __init__(self, img, psf, fHat=None):
+    def __init__(self, img, psf, fHat=None, prefilter=False):
         """Initialize a new PMAP problem.
 
         Parameters
@@ -33,10 +33,16 @@ class PMAP:
         img : `numpy.ndarray`
             image from the camera, ndarray of shape (n, m)
         psf : `numpy.ndarray`
-            psf corresponding to img, ndarray of shape (n, m)
-        fhat : `numpy.ndarray`
-            initial object estimate, ndarray of shape (n, m)
-            if None, taken to be the img
+            psf corresponding to img, ndarray of shape (a, b)
+        fhat : `numpy.ndarray`, optional
+            initial object estimate, ndarray of shape (a, b)
+            if None, taken to be the img, rescaled if necessary to match PSF
+            sampling
+        prefilter : `bool`, optional
+            if True, uses input stage filters when performing spline-based
+            resampling, else no input filter is used.  No pre-filtering is
+            generally a best fit for image chain modeling and allows aliasing
+            into the problem that would be present in a hardware system.
 
         """
         self.img = img
@@ -48,10 +54,15 @@ class PMAP:
         self.otf = otf
         self.otfconj = np.conj(otf)
 
-        if fHat is None:
-            fHat = img
+        self.zoomfactor = self.psf.shape[0] / self.img.shape[0]
+        self.invzoomfactor = 1 / self.zoomfactor
+        self.prefilter = prefilter
 
+        if fHat is None:
+            fHat = ndimage.zoom(img, self.zoomfactor, prefilter=prefilter)
         self.fHat = fHat
+        self.bufup = np.empty(self.psf.shape, dtype=self.psf.dtype)
+        self.bufdown = np.empty(self.img.shape, dtype=self.img.dtype)
         self.iter = 0
 
     def step(self):
@@ -60,14 +71,25 @@ class PMAP:
         Returns
         -------
         fhat : `numpy.ndarray`
-            updated object estimate, of shape (n, m)
+            updated object estimate, of shape (a, b)
 
         """
         Fhat = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(self.fHat)))
         denom = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(Fhat * self.otf))).real
+        # denom may be supre-resolved, i.e. have more pixels than g
+        # zoomfactor is the ratio of their sampling, the below does
+        # inline up and down scaling as denoted in Ref [1] Eq. 2.26
+        # re-assign denom and kernel, non-allocating invocation of zoom
+        if self.zoomfactor != 1:
+            ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
+            denom = self.bufdown
+            kernel = (self.img / denom) - 1
+            ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
+            kernel = self.bufup
+        else:
+            # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
+            kernel = (self.img / denom) - 1
 
-        # # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-        kernel = (self.img / denom) - 1
         R = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(kernel)))
         grad = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(R * self.otfconj))).real
         self.fHat = self.fHat * np.exp(grad)
@@ -81,7 +103,7 @@ class MFPMAP:
     Implements Ref [1], Eq. 2.26.
     """
 
-    def __init__(self, imgs, psfs, fHat=None):
+    def __init__(self, imgs, psfs, fHat=None, prefilter=False):
         """Initialize a new PMAP problem.
 
         Parameters
@@ -92,10 +114,16 @@ class MFPMAP:
             A (k, n, m) shaped array iterates correctly, as does a list or other
             iterable of (n, m) arrays
         psfs : `numpy.ndarray`
-            psfs corresponding to imgs, sequence of ndarray of shape (n, m)
+            psfs corresponding to imgs, sequence of ndarray of shape (a, b)
         fhat : `numpy.ndarray`
-            initial object estimate, ndarray of shape (n, m)
-            if None, taken to be the first img
+            initial object estimate, ndarray of shape (a, b)
+            if None, taken to be the first img rescaled if necessary to match
+            PSF sampling
+        prefilter : `bool`, optional
+            if True, uses input stage filters when performing spline-based
+            resampling, else no input filter is used.  No pre-filtering is
+            generally a best fit for image chain modeling and allows aliasing
+            into the problem that would be present in a hardware system.
 
         Notes
         -----
@@ -115,10 +143,16 @@ class MFPMAP:
         self.otfs = otfs
         self.otfsconj = [np.conj(otf) for otf in otfs]
 
+        self.zoomfactor = self.psfs[0].shape[0] / self.imgs[0].shape[0]
+        self.invzoomfactor = 1 / self.zoomfactor
+        self.prefilter = prefilter
+
         if fHat is None:
-            fHat = imgs[0]
+            fHat = ndimage.zoom(imgs[0], self.zoomfactor, prefilter=prefilter)
 
         self.fHat = fHat
+        self.bufup = np.empty(self.psfs[0].shape, dtype=self.psfs[0].dtype)
+        self.bufdown = np.empty(self.imgs[0].shape, dtype=self.imgs[0].dtype)
         self.iter = 0
 
     def step(self):
@@ -131,7 +165,7 @@ class MFPMAP:
         Returns
         -------
         fhat : `numpy.ndarray`
-            updated object estimate, of shape (n, m)
+            updated object estimate, of shape (a, b)
 
         """
         i = self.iter % len(self.otfs)
@@ -142,9 +176,16 @@ class MFPMAP:
 
         Fhat = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(self.fHat)))
         denom = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(Fhat * otf))).real
+        if self.zoomfactor != 1:
+            ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
+            denom = self.bufdown
+            kernel = (img / denom) - 1
+            ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
+            kernel = self.bufup
+        else:
+            # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
+            kernel = (img / denom) - 1
 
-        # # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-        kernel = (img / denom) - 1
         R = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(kernel)))
         grad = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(R * otfconj))).real
         self.fHat = self.fHat * np.exp(grad)
