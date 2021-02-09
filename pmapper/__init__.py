@@ -1,6 +1,6 @@
 """PMAP family of algorithms."""
 
-import numpy as np
+from .backend import np, ndimage
 
 # Refs:
 # [1] "Multiframe restoration methods for image synthesis and recovery",
@@ -11,12 +11,21 @@ import numpy as np
 # Proceedings of International Conference on Image Processing,
 # 26-29 Oct. 1997, DOI 10.1109/ICIP.1997.648103
 
+# implementation notes:
+# A version which used matrix DFTs was tried, but proved (slightly) slower for
+# 512x512 -- 5.2 ms/iter vs 4.6 ms/iter.  FFT has better asymptotic time
+# complexity than MDFT, and image resolution is only increasing.  Therefore, the
+# FFT version is preferred.
+#
+# A slightly different implementation would replace the prefilter init argument
+# with an actual function to be used to perform up/downsampling.  This would be
+# a bit more flexible, but require a bit more work on the user and likely need
+# functools.partial to get everything down to one interface.  What is here
+# forces a particular resizing algorithm, but it is a good enough choice to work
+# well in this application.
 
 # TODO:
 # - Bayer
-# - superresolution via interpolation and decimation
-# - copy/paste engine from prysm for CPU/GPU flexibility
-# - FFT vs MDFT (MDFT seems not meaningfully faster to justify complexity)
 
 
 class PMAP:
