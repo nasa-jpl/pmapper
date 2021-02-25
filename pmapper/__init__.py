@@ -1,8 +1,13 @@
 """PMAP family of algorithms."""
 
-from .backend import np, ndimage
+from .backend import np, ndimage, fft
 
-from .bayer import decomposite_bayer, composite_bayer, demosaic_malvar
+from .bayer import decomposite_bayer, composite_bayer
+
+# If you wish to understand how PMAP works from this code, it is recommended
+# that you read :class:PMAP first.  MFPMAP is just PMAP that cycles through the
+# frames, and Bayer implementations are the same, but with inner iterations per
+# step for the color planes.
 
 # Refs:
 # [1] "Multiframe restoration methods for image synthesis and recovery",
@@ -23,11 +28,8 @@ from .bayer import decomposite_bayer, composite_bayer, demosaic_malvar
 # with an actual function to be used to perform up/downsampling.  This would be
 # a bit more flexible, but require a bit more work on the user and likely need
 # functools.partial to get everything down to one interface.  What is here
-# forces a particular resizing algorithm, but it is a good enough choice to work
-# well in this application.
-
-# TODO:
-# - Bayer
+# forces a particular resizing algorithm, but it is as good as can be done to
+# the author's knowledge anyway.
 
 
 class PMAP:
@@ -59,7 +61,7 @@ class PMAP:
         self.img = img
         self.psf = psf
 
-        otf = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psf)))
+        otf = fft.fftshift(fft.fft2(fft.ifftshift(psf)))
         center = tuple(s // 2 for s in otf.shape)
         otf /= otf[center]  # definition of OTF, normalize by DC
         self.otf = otf
@@ -85,8 +87,8 @@ class PMAP:
             updated object estimate, of shape (a, b)
 
         """
-        Fhat = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(self.fHat)))
-        denom = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(Fhat * self.otf))).real
+        Fhat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
+        denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * self.otf))).real
         # denom may be supre-resolved, i.e. have more pixels than g
         # zoomfactor is the ratio of their sampling, the below does
         # inline up and down scaling as denoted in Ref [1] Eq. 2.26
@@ -101,11 +103,100 @@ class PMAP:
             # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
             kernel = (self.img / denom) - 1
 
-        R = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(kernel)))
-        grad = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(R * self.otfconj))).real
+        R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
+        grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * self.otfconj))).real
         self.fHat = self.fHat * np.exp(grad)
         self.iter += 1
         return self.fHat
+
+
+class BayerPMAP:
+    """Classical Bayer-aware PMAP algorithm.  Suitable for trichromatic restoration.
+
+    Implements Ref [1], Eq. 2.16 with modifications for bayer.
+    """
+
+    def __init__(self, img, psfs, fHats=None, prefilter=False, cfa='rggb'):
+        """Initialize a new PMAP problem.
+
+        Parameters
+        ----------
+        img : `numpy.ndarray`
+            image from the camera, ndarray of shape (n, m)
+        psfs : iterable of `numpy.ndarray`
+            sequence of PSFs corresponding to img, ndarrays of shape (a, b) in
+            the same order as the cfa string
+        fhats : iterable of `numpy.ndarray`, optional
+            sequence of  initial object estimates for each color plane,
+            ndarrays of shape (a, b).  if None, taken to be the img, rescaled
+            if necessary to match PSF sampling
+        prefilter : `bool`, optional
+            if True, uses input stage filters when performing spline-based
+            resampling, else no input filter is used.  No pre-filtering is
+            generally a best fit for image chain modeling and allows aliasing
+            into the problem that would be present in a hardware system.
+
+        """
+        self.imgs = decomposite_bayer(img, cfa)
+        self.psfs = psfs
+        self.cfa = cfa
+
+        otfs = [fft.fftshift(fft.fft2(fft.ifftshift(psf))) for psf in psfs]
+        center = tuple(s // 2 for s in otfs[0].shape)
+        for otf in otfs:
+            otf /= otf[center]  # definition of OTF, normalize by DC
+
+        self.otfs = otfs
+        self.otfsconj = [np.conj(otf) for otf in otfs]
+
+        self.zoomfactor = self.psfs[0].shape[0] / self.imgs[0].shape[0]
+        self.invzoomfactor = 1 / self.zoomfactor
+        self.prefilter = prefilter
+
+        if fHats is None:
+            fHats = decomposite_bayer(img, cfa)
+            fHats = [ndimage.zoom(f, self.zoomfactor, prefilter=prefilter) for f in fHats]
+
+        self.fHats = fHats
+        self.bufup = np.empty(self.psfs[0].shape, dtype=self.psfs[0].dtype)
+        self.bufdown = np.empty(self.imgs[0].shape, dtype=self.imgs[0].dtype)
+        self.iter = 0
+
+    def step(self):
+        """Iterate the algorithm one step.
+
+        Returns
+        -------
+        fhat : `numpy.ndarray`
+            updated object estimate, of shape (a, b)
+
+        """
+        lcl_fHats = []
+        for img, otf, otfconj, fHat in zip(self.imgs, self.otfs, self.otfsconj, self.fHats):
+            Fhat = fft.fftshift(fft.fft2(fft.ifftshift(fHat)))
+            denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * otf))).real
+            # denom may be supre-resolved, i.e. have more pixels than g
+            # zoomfactor is the ratio of their sampling, the below does
+            # inline up and down scaling as denoted in Ref [1] Eq. 2.26
+            # re-assign denom and kernel, non-allocating invocation of zoom
+            if self.zoomfactor != 1:
+                ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
+                denom = self.bufdown
+                kernel = (img / denom) - 1
+                ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
+                kernel = self.bufup
+            else:
+                # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
+                kernel = (img / denom) - 1
+
+            R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
+            grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * otfconj))).real
+            fHat = fHat * np.exp(grad)
+            lcl_fHats.append(fHat)
+
+        self.fHats = lcl_fHats
+        self.iter += 1
+        return self.fHats
 
 
 class MFPMAP:
@@ -146,7 +237,7 @@ class MFPMAP:
         self.imgs = imgs
         self.psfs = psfs
 
-        otfs = [np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psf))) for psf in psfs]
+        otfs = [fft.fftshift(fft.fft2(fft.ifftshift(psf))) for psf in psfs]
         center = tuple(s // 2 for s in otfs[0].shape)
         for otf in otfs:
             otf /= otf[center]  # definition of OTF, normalize by DC
@@ -185,8 +276,8 @@ class MFPMAP:
         img = self.imgs[i]
         otfconj = self.otfsconj[i]
 
-        Fhat = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(self.fHat)))
-        denom = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(Fhat * otf))).real
+        Fhat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
+        denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * otf))).real
         if self.zoomfactor != 1:
             ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
             denom = self.bufdown
@@ -197,8 +288,8 @@ class MFPMAP:
             # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
             kernel = (img / denom) - 1
 
-        R = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(kernel)))
-        grad = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(R * otfconj))).real
+        R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
+        grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * otfconj))).real
         self.fHat = self.fHat * np.exp(grad)
         self.iter += 1
         return self.fHat
@@ -213,7 +304,7 @@ class BayerMFPMAP:
     independently.
     """
 
-    def __init__(self, imgs, Rpsfs, G1psfs, G2psfs, Bpsfs, fHats=None, prefilter=False, cfa='rggb'):
+    def __init__(self, imgs, psfs, fHats=None, prefilter=False, cfa='rggb'):
         """Initialize a new PMAP problem.
 
         Parameters
@@ -223,18 +314,11 @@ class BayerMFPMAP:
             The images must be fully co-registered before input to the algorithm.
             A (k, n, m) shaped array iterates correctly, as does a list or other
             iterable of (n, m) arrays
-        Rpsfs : `iterable` of `numpy.ndarray`
-            red channel psfs corresponding to imgs,
-            sequence of ndarray of shape(a, b)
-        G1psfs : `iterable` of `numpy.ndarray`
-            red channel psfs corresponding to imgs,
-            sequence of ndarray of shape(a, b)
-        G2psfs : `iterable` of `numpy.ndarray`
-            red channel psfs corresponding to imgs,
-            sequence of ndarray of shape(a, b)
-        Bpsfs : `iterable` of `numpy.ndarray`
-            red channel psfs corresponding to imgs,
-            sequence of ndarray of shape(a, b)
+        psfs : iterable of iterable of `numpy.ndarray`
+            outer iteration is the color channel, inner iteration is the image.
+            An ndarray of shape (s, k, a, b) iterates correctly.  The dimension
+            s notionally must always be of size 4 (the number of channels in a
+            bayer mosaic).
         fhats : `iterable` of `numpy.ndarray`
             r, g1, g2, b initial object estimates, ndarrays of shape (a, b)
             if None, taken to be the first img rescaled if necessary to match
@@ -256,60 +340,43 @@ class BayerMFPMAP:
         Malvar debayering.  This package includes an implementation of Malvar.
 
         """
-        self.Rimgs, self.G1imgs, self.G2imgs, self.Bimgs = [], [], [], []
-        for img in imgs:
-            r, g1, g2, b = decomposite_bayer(img, cfa)
-            self.Rimgs.append(r)
-            self.G1imgs.append(g1)
-            self.G2imgs.append(g2)
-            self.Bimgs.append(b)
+        self.imgs = np.array([decomposite_bayer(i, cfa) for i in imgs])
+        self.psfs = psfs
+        self.otfs = []
+        self.otfsconj = []
+        psfs = np.array(psfs)
+        self.psfs = psfs
+        for s in range(psfs.shape[0]):
+            # lcl = local
+            lcl_otfs = [fft.fftshift(fft.fft2(fft.ifftshift(psf))) for psf in psfs[s]]
+            # definition of OTF, normalize by DC
+            center = tuple(e // 2 for e in lcl_otfs[0].shape)
+            for otf in lcl_otfs:
+                otf /= otf[center]
 
-        self.Rpsfs = Rpsfs
-        self.G1psfs = G1psfs
-        self.G2psfs = G2psfs
-        self.Bpsfs = Bpsfs
+            lcl_otfs_conj = [np.conj(otf) for otf in lcl_otfs]
+            self.otfs.append(lcl_otfs)
+            self.otfsconj.append(lcl_otfs_conj)
 
-        Rotfs = [np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psf))) for psf in Rpsfs]
-        G1otfs = [np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psf))) for psf in G1psfs]
-        G2otfs = [np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psf))) for psf in G2psfs]
-        Botfs = [np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psf))) for psf in Bpsfs]
-
-        # definition of OTF, normalize by DC
-        center = tuple(s // 2 for s in Rotfs[0].shape)
-        for otf in Rotfs:
-            otf /= otf[center]
-        for otf in G1otfs:
-            otf /= otf[center]
-        for otf in G2otfs:
-            otf /= otf[center]
-        for otf in Botfs:
-            otf /= otf[center]
-
-        self.Rotfs = Rotfs
-        self.G1otfs = G1otfs
-        self.G2otfs = G2otfs
-        self.Botfs = Botfs
-
-        self.Rotfsconj = [np.conj(otf) for otf in Rotfs]
-        self.G1otfsconj = [np.conj(otf) for otf in G1otfs]
-        self.G2otfsconj = [np.conj(otf) for otf in G2otfs]
-        self.Botfsconj = [np.conj(otf) for otf in Botfs]
-
-        self.zoomfactor = self.Rpsfs[0].shape[0] / self.Rimgs[0].shape[0]
+        self.zoomfactor = self.psfs.shape[-1] / self.imgs.shape[-1]
         self.invzoomfactor = 1 / self.zoomfactor
         self.prefilter = prefilter
 
         if fHats is None:
-            imgs = (self.Rimgs[0], self.G1imgs[0], self.G2imgs[0], self.Bimgs[0])
+            imgs = self.imgs[0]
             fHats = [ndimage.zoom(i, self.zoomfactor, prefilter=prefilter) for i in imgs]
 
+        # swapaxis moves the bayer channels to the first dimension.  As contiguous makes sure
+        # that the memory is copied instead of a view created -- we will revisit these arrays
+        # many times and paying the copy here will pay dividends later
+        self.imgs = np.ascontiguousarray(self.imgs.swapaxes(0, 1))
         self.fHats = fHats
 
-        self.bufup = np.empty(self.Rpsfs[0].shape, dtype=self.Rpsfs[0].dtype)
-        self.bufdown = np.empty(self.Rimgs[0].shape, dtype=self.Rimgs[0].dtype)
+        self.bufup = np.empty(self.psfs.shape[-2:], dtype=self.psfs.dtype)
+        self.bufdown = np.empty(self.imgs.shape[-2:], dtype=self.imgs.dtype)
         self.iter = 0
 
-    def step(self, ret='planes'):
+    def step(self):
         """Iterate the algorithm one step.
 
         Because this implementation cycles through the images, the steps can be
@@ -324,20 +391,19 @@ class BayerMFPMAP:
 
         Returns
         -------
-        fhat : `numpy.ndarray`
-            updated object estimate, of shape (a, b)
+        fhats : iterable of `numpy.ndarray`
+            updated object estimates, of shape 4x (a, b)
 
         """
-        i = self.iter % len(self.Rotfs)
+        i = self.iter % self.imgs.shape[1]
 
         lcl_fHats = []
-        for otfs, imgs, otfsconj, fHat in zip(self.otfs, self.imgs, self.otfsconj, self.fHats):
+        for imgs, otfs, otfsconj, fHat in zip(self.imgs, self.otfs, self.otfsconj, self.fHats):
             otf = otfs[i]
             img = imgs[i]
             otfconj = otfsconj[i]
-
-            Fhat = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(fHat)))
-            denom = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(Fhat * otf))).real
+            Fhat = fft.fftshift(fft.fft2(fft.ifftshift(fHat)))
+            denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * otf))).real
             if self.zoomfactor != 1:
                 ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
                 denom = self.bufdown
@@ -348,14 +414,11 @@ class BayerMFPMAP:
                 # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
                 kernel = (img / denom) - 1
 
-            R = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(kernel)))
-            grad = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(R * otfconj))).real
+            R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
+            grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * otfconj))).real
             fHatprime = fHat * np.exp(grad)
             lcl_fHats.append(fHatprime)
 
         self.fHats = lcl_fHats
         self.iter += 1
-        if ret == 'planes':
-            return self.fHat
-        else:
-            return composite_bayer(*self.fHats, cfa=self.cfa)
+        return self.fHats

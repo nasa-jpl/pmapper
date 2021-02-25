@@ -1,7 +1,7 @@
 """CPU/GPU/Framework agnostic backend."""
 import numpy as np
 
-from scipy import ndimage
+from scipy import ndimage, fft
 
 # the contents of this file is taken from the 'prysm' repository on GitHub which
 # is MIT licensed.  backend.py must not be separated from prysm-LICENSE.md.  No
@@ -64,5 +64,35 @@ class NDImageEngine:
         return getattr(self.ndimage, key)
 
 
+class FFTEngine:
+    """An engine which allows scipy.fft to be redirected to another lib at runtime."""
+    def __init__(self, fft=fft):
+        """Create a new scipy engine.
+
+        Parameters
+        ----------
+        fft : `module`
+            a python module, with the same API as scipy.fft
+        interpolate : `module`
+            a python module, with the same API as scipy.interpolate
+        special : `module`
+            a python module, with the same API as scipy.special
+
+        """
+        self.fft = fft
+
+    def __getattr__(self, key):
+        """Get attribute.
+
+        Parameters
+        ----------
+        key : `str`
+            attribute name
+
+        """
+        return getattr(self.fft, key)
+
+
 np = NumpyEngine()
 ndimage = NDImageEngine(ndimage)
+fft = FFTEngine(fft)

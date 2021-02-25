@@ -1,10 +1,10 @@
 """Basic operations for bayer data."""
 from .backend import np, ndimage
 
-top_left = (slice(0, -1, 2), slice(0, -1, 2))
-top_right = (slice(1, -1, 2), slice(0, -1, 2))
-bottom_left = (slice(0, -1, 2), slice(1, -1, 2))
-bottom_right = (slice(1, -1, 2), slice(1, -1, 2))
+top_left = (slice(0, None, 2), slice(0, None, 2))
+top_right = (slice(1, None, 2), slice(0, None, 2))
+bottom_left = (slice(0, None, 2), slice(1, None, 2))
+bottom_right = (slice(1, None, 2), slice(1, None, 2))
 
 ErrBadCFA = NotImplementedError('only rggb, bggr bayer patterns currently implemented')
 
