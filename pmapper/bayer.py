@@ -8,6 +8,38 @@ bottom_right = (slice(1, None, 2), slice(1, None, 2))
 
 ErrBadCFA = NotImplementedError('only rggb, bggr bayer patterns currently implemented')
 
+def wb_prescale(mosaic, wr, wg1, wg2, wb, cfa='rggb'):
+    """Apply white-balance prescaling in-place to mosaic.
+
+    Parameters
+    ----------
+    mosaic : `numpy.ndarray`
+        ndarray of shape (m, n), a float dtype
+    wr : `float`
+        red white balance prescalar
+    wg1 : `float`
+        G1 white balance prescalar
+    wg2 : `float`
+        G2 white balance prescalar
+    wb : `float`
+        blue white balance prescalar
+    cfa : `str`, optional, {'rggb', 'bggr'}
+        color filter arrangement
+
+    """
+    cfa = cfa.lower()
+    if cfa == 'rggb':
+        mosaic[top_left] *= wr
+        mosaic[top_right] *= wg1
+        mosaic[bottom_left] *= wg2
+        mosaic[bottom_right] *= wb
+    elif cfa == 'bggr':
+        mosaic[top_left] *= wb
+        mosaic[top_right] *= wg1
+        mosaic[bottom_left] *= wg2
+        mosaic[bottom_right] *= wr
+    else:
+        raise ErrBadCFA
 
 def composite_bayer(r, g1, g2, b, cfa='rggb', output=None):
     """Composite an interleaved image from densely sampled bayer color planes.
