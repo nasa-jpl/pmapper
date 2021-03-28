@@ -8,6 +8,7 @@ bottom_right = (slice(1, None, 2), slice(1, None, 2))
 
 ErrBadCFA = NotImplementedError('only rggb, bggr bayer patterns currently implemented')
 
+
 def wb_prescale(mosaic, wr, wg1, wg2, wb, cfa='rggb'):
     """Apply white-balance prescaling in-place to mosaic.
 
@@ -40,6 +41,7 @@ def wb_prescale(mosaic, wr, wg1, wg2, wb, cfa='rggb'):
         mosaic[bottom_right] *= wr
     else:
         raise ErrBadCFA
+
 
 def composite_bayer(r, g1, g2, b, cfa='rggb', output=None):
     """Composite an interleaved image from densely sampled bayer color planes.
@@ -120,6 +122,52 @@ def decomposite_bayer(img, cfa='rggb'):
 
     return r, g1, g2, b
 
+
+def recomposite_bayer(r, g1, g2, b, cfa='rggb', output=None):
+    """Recomposite raw color planes back into a mosaic.
+
+    This function is the reciprocal of decomposite_bayer
+
+    Parameters
+    ----------
+    r : `numpy.ndarray`
+        ndarray of shape (m, n)
+    g1 : `numpy.ndarray`
+        ndarray of shape (m, n)
+    g2 : `numpy.ndarray`
+        ndarray of shape (m, n)
+    b : `numpy.ndarray`
+        ndarray of shape (m, n)
+    cfa : `str`, optional, {'rggb', 'bggr'}
+        color filter arangement
+    output : `numpy.ndarray`, optional
+        output array, of shape (2m, 2n) and same dtype as r, g1, g2, b
+
+    Returns
+    -------
+    `numpy.ndarray`
+        array containing the re-composited color planes
+
+    """
+    m, n = r.shape
+    if output is None:
+        output = np.empty((2*m, 2*n), dtype=r.dtype)
+
+    cfa = cfa.lower()
+    if cfa == 'rggb':
+        output[top_left] = r
+        output[top_right] = g1
+        output[bottom_left] = g2
+        output[bottom_right] = b
+    elif cfa == 'bggr':
+        output[top_left] = b
+        output[top_right] = g1
+        output[bottom_left] = g2
+        output[bottom_right] = r
+    else:
+        raise ErrBadCFA
+
+    return output
 
 # Kernels from Malvar et al, fig 2.
 # names derived from the paper,
