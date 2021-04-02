@@ -6,6 +6,10 @@ The name of this repository is an homage to MTF-Mapper, a slanted edge MTF measu
 The contents are implementations of PMAP, an image restoration and superresolution algorithm developed by Joe Green, who is now a Principal Optical Engineer at JPL.  Several flavors of PMAP are implemented under a common interface.  They are:
 
 - `PMAP`, the contemporary PMAP algorithm
+- `BayerPMAP`, PMAP, adapted for raw bayer data (no demosaicing requried)
 - `MFPMAP`, Multi-Frame PMAP
+- `BayerMFPMAP`, Multi-Frame PMAP, adapted to bayer same as PMAP.
 
-All support basic as well as super-resolution variants, based on whether the input PSF is of the same shape (rows x cols) as the input image(s) or not.  At this time, they only support panchromatic imagery, but a future extension to Bayer detectors is planned.  The algorithms are implemented in a backend-agonstic way which allows the user to execute the algorithms on either a CPU or a GPU at whim.
+All support basic as well as super-resolution variants, based on whether the input PSF is of the same shape (rows x cols) as the input image(s) or not.
+
+This implementation of PMAP is extremely fast.  PMAP itself is usually superior to Richardson-Lucy deconvolution or a Weiner filter.
