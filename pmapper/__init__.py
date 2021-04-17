@@ -32,6 +32,104 @@ from .bayer import decomposite_bayer, composite_bayer
 # the author's knowledge anyway.
 
 
+def ft_fwd(a):
+    """Forward Fourier transform.
+
+    Parameters
+    ----------
+    a : `numpy.ndarray`
+        ndarray of shape (m, n)
+
+    Returns
+    -------
+    `numpy.ndarray`
+        complex-valued FT of shape (m, n)
+
+    Notes
+    -----
+    this function makes those that use it clearer, replacing
+    ft_fwd(a))) with ft_fwd(a)
+
+    """
+    return fft.fftshift(fft.fft2(fft.ifftshift(a)))
+
+
+def ft_rev(a):
+    """Reverse (inverse) Fourier transform.
+
+    Parameters
+    ----------
+    a : `numpy.ndarray`
+        ndarray of shape (m, n)
+
+    Returns
+    -------
+    `numpy.ndarray`
+        complex-valued FT of shape (m, n)
+
+    Notes
+    -----
+    this function makes those that use it clearer, replacing
+    fft.fftshift(fft.ifft2(fft.ifftshift(a))) with ft_fwd(a)
+
+    """
+    return fft.fftshift(fft.ifft2(fft.ifftshift(a)))
+
+
+def pmap_core(fHat, g, H, Hstar, bufup=None, bufdown=None, prefilter=False, zoomfactor=1, invzoomfactor=1):
+    """Core routine of PMAP, produce a new object estimate
+
+    Parameters
+    ----------
+    fHat : `numpy.ndarray`
+        Nth object estimate, ndarray of shape (m, n)
+    g : `numpy.ndarray`
+        source image, ndarray of shape (a, b)
+    H : `numpy.ndarray`
+        OTF, complex ndarray of shape (m, n)
+    Hstar : `numpy.ndarray`
+        complex conjugate of H, ndarray of shape (m, n)
+    bufup : `numpy.ndarray`, optional
+        real-valued buffer for upsampled data, of shape (m, n)
+    bufdown : `numpy.ndarray`, optional
+        real-valued buffer for downsampled data, of shape (a, b)
+    prefilter : `bool`, optional
+        if True, use spline prefiltering
+        False is generally better at getting realistic image chain aliasing correct
+    zoomfactor : `float`, optional
+        ratio m/a
+    invzoomfactor : `float`, optional
+        ratio a/m
+
+    Returns
+    -------
+    fHat : `numpy.ndarray`
+        N+1th object estimate, ndarray of shape (m, n)
+
+    """
+    if zoomfactor == 1 and fHat.shape[0] != H.shape[0]:
+        raise ValueError(f'PMAP: zoom factor was given as 1, but fHat and OTF have unequal shapes {fHat.shape} and {H.shape}')  # NOQA
+
+    Fhat = ft_fwd(fHat)
+    denom = ft_rev(Fhat * H).real
+    # denom may be supre-resolved, i.e. have more pixels than g
+    # zoomfactor is the ratio of their sampling, the below does
+    # inline up and down scaling as denoted in Ref [1] Eq. 2.26
+    # re-assign denom and kernel, non-allocating invocation of zoom
+    if zoomfactor != 1:
+        denom = ndimage.zoom(denom, invzoomfactor, prefilter=prefilter, output=bufdown)
+        kernel = (g / denom) - 1
+        kernel = ndimage.zoom(kernel, zoomfactor, prefilter=prefilter, output=bufup)
+    else:
+        # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
+        kernel = (g / denom) - 1
+
+    R = ft_fwd(kernel)
+    grad = ft_rev(R * Hstar).real
+    fHat = fHat * np.exp(grad)
+    return fHat
+
+
 class PMAP:
     """Classical PMAP algorithm.  Suitable for panchromatic restoration.
 
@@ -61,7 +159,7 @@ class PMAP:
         self.img = img
         self.psf = psf
 
-        otf = fft.fftshift(fft.fft2(fft.ifftshift(psf)))
+        otf = ft_fwd(psf)
         center = tuple(s // 2 for s in otf.shape)
         otf /= otf[center]  # definition of OTF, normalize by DC
         self.otf = otf
@@ -87,25 +185,9 @@ class PMAP:
             updated object estimate, of shape (a, b)
 
         """
-        Fhat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
-        denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * self.otf))).real
-        # denom may be supre-resolved, i.e. have more pixels than g
-        # zoomfactor is the ratio of their sampling, the below does
-        # inline up and down scaling as denoted in Ref [1] Eq. 2.26
-        # re-assign denom and kernel, non-allocating invocation of zoom
-        if self.zoomfactor != 1:
-            ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
-            denom = self.bufdown
-            kernel = (self.img / denom) - 1
-            ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
-            kernel = self.bufup
-        else:
-            # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-            kernel = (self.img / denom) - 1
-
-        R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
-        grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * self.otfconj))).real
-        self.fHat = self.fHat * np.exp(grad)
+        self.fHat = pmap_core(self.fHat, self.img, self.otf, self.otfconj,
+                              self.bufup, self.bufdown, self.prefilter,
+                              self.zoomfactor, self.invzoomfactor)
         self.iter += 1
         return self.fHat
 
@@ -141,7 +223,7 @@ class BayerPMAP:
         self.psfs = psfs
         self.cfa = cfa
 
-        otfs = [fft.fftshift(fft.fft2(fft.ifftshift(psf))) for psf in psfs]
+        otfs = [ft_fwd(psf) for psf in psfs]
         center = tuple(s // 2 for s in otfs[0].shape)
         for otf in otfs:
             otf /= otf[center]  # definition of OTF, normalize by DC
@@ -173,25 +255,9 @@ class BayerPMAP:
         """
         lcl_fHats = []
         for img, otf, otfconj, fHat in zip(self.imgs, self.otfs, self.otfsconj, self.fHats):
-            Fhat = fft.fftshift(fft.fft2(fft.ifftshift(fHat)))
-            denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * otf))).real
-            # denom may be supre-resolved, i.e. have more pixels than g
-            # zoomfactor is the ratio of their sampling, the below does
-            # inline up and down scaling as denoted in Ref [1] Eq. 2.26
-            # re-assign denom and kernel, non-allocating invocation of zoom
-            if self.zoomfactor != 1:
-                ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
-                denom = self.bufdown
-                kernel = (img / denom) - 1
-                ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
-                kernel = self.bufup
-            else:
-                # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-                kernel = (img / denom) - 1
-
-            R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
-            grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * otfconj))).real
-            fHat = fHat * np.exp(grad)
+            fHat = pmap_core(fHat, img, otf, otfconj,
+                             self.bufup, self.bufdown, self.prefilter,
+                             self.zoomfactor, self.invzoomfactor)
             lcl_fHats.append(fHat)
 
         self.fHats = lcl_fHats
@@ -237,7 +303,7 @@ class MFPMAP:
         self.imgs = imgs
         self.psfs = psfs
 
-        otfs = [fft.fftshift(fft.fft2(fft.ifftshift(psf))) for psf in psfs]
+        otfs = [ft_fwd(psf) for psf in psfs]
         center = tuple(s // 2 for s in otfs[0].shape)
         for otf in otfs:
             otf /= otf[center]  # definition of OTF, normalize by DC
@@ -275,22 +341,9 @@ class MFPMAP:
         otf = self.otfs[i]
         img = self.imgs[i]
         otfconj = self.otfsconj[i]
-
-        Fhat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
-        denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * otf))).real
-        if self.zoomfactor != 1:
-            ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
-            denom = self.bufdown
-            kernel = (img / denom) - 1
-            ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
-            kernel = self.bufup
-        else:
-            # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-            kernel = (img / denom) - 1
-
-        R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
-        grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * otfconj))).real
-        self.fHat = self.fHat * np.exp(grad)
+        self.fHat = pmap_core(self.fhat, img, otf, otfconj,
+                              self.bufup, self.bufdown, self.prefilter,
+                              self.zoomfactor, self.invzoomfactor)
         self.iter += 1
         return self.fHat
 
@@ -348,7 +401,7 @@ class BayerMFPMAP:
         self.psfs = psfs
         for s in range(psfs.shape[0]):
             # lcl = local
-            lcl_otfs = [fft.fftshift(fft.fft2(fft.ifftshift(psf))) for psf in psfs[s]]
+            lcl_otfs = [ft_fwd(psf) for psf in psfs[s]]
             # definition of OTF, normalize by DC
             center = tuple(e // 2 for e in lcl_otfs[0].shape)
             for otf in lcl_otfs:
@@ -402,22 +455,10 @@ class BayerMFPMAP:
             otf = otfs[i]
             img = imgs[i]
             otfconj = otfsconj[i]
-            Fhat = fft.fftshift(fft.fft2(fft.ifftshift(fHat)))
-            denom = fft.fftshift(fft.ifft2(fft.ifftshift(Fhat * otf))).real
-            if self.zoomfactor != 1:
-                ndimage.zoom(denom, self.invzoomfactor, prefilter=self.prefilter, output=self.bufdown)
-                denom = self.bufdown
-                kernel = (img / denom) - 1
-                ndimage.zoom(kernel, self.zoomfactor, prefilter=self.prefilter, output=self.bufup)
-                kernel = self.bufup
-            else:
-                # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-                kernel = (img / denom) - 1
-
-            R = fft.fftshift(fft.fft2(fft.ifftshift(kernel)))
-            grad = fft.fftshift(fft.ifft2(fft.ifftshift(R * otfconj))).real
-            fHatprime = fHat * np.exp(grad)
-            lcl_fHats.append(fHatprime)
+            fHat = pmap_core(fHat, img, otf, otfconj,
+                             self.bufup, self.bufdown, self.prefiler,
+                             self.zoomfactor, self.invzoomfactor)
+            lcl_fHats.append(fHat)
 
         self.fHats = lcl_fHats
         self.iter += 1
