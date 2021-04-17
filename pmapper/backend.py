@@ -66,6 +66,7 @@ class NDImageEngine:
 
 class FFTEngine:
     """An engine which allows scipy.fft to be redirected to another lib at runtime."""
+
     def __init__(self, fft=fft):
         """Create a new scipy engine.
 
@@ -96,3 +97,47 @@ class FFTEngine:
 np = NumpyEngine()
 ndimage = NDImageEngine(ndimage)
 fft = FFTEngine(fft)
+
+
+def ft_fwd(a):
+    """Forward Fourier transform.
+
+    Parameters
+    ----------
+    a : `numpy.ndarray`
+        ndarray of shape (m, n)
+
+    Returns
+    -------
+    `numpy.ndarray`
+        complex-valued FT of shape (m, n)
+
+    Notes
+    -----
+    this function makes those that use it clearer, replacing
+    ft_fwd(a))) with ft_fwd(a)
+
+    """
+    return fft.fftshift(fft.fft2(fft.ifftshift(a)))
+
+
+def ft_rev(a):
+    """Reverse (inverse) Fourier transform.
+
+    Parameters
+    ----------
+    a : `numpy.ndarray`
+        ndarray of shape (m, n)
+
+    Returns
+    -------
+    `numpy.ndarray`
+        complex-valued FT of shape (m, n)
+
+    Notes
+    -----
+    this function makes those that use it clearer, replacing
+    fft.fftshift(fft.ifft2(fft.ifftshift(a))) with ft_fwd(a)
+
+    """
+    return fft.fftshift(fft.ifft2(fft.ifftshift(a)))
