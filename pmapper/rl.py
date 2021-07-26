@@ -33,15 +33,15 @@ class RichardsonLucy:
 
         self.iter = 0
 
-        def step(self):
-            """Step the algorithm forward one step."""
-            num = self.img
-            FHat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
-            den = fft.fftshift(fft.ifft2(fft.ifftshift(FHat*self.otf)))
-            term1 = num / den
-            D = fft.fftshift(fft.fft2(fft.ifftshift(term1)))
-            Dprime = D * self.otfT
-            update = fft.fftshift(fft.ifft2(fft.ifftshift(Dprime)))
-            self.fHat = self.fHat * update
-            self.iter += 1
-            return self.fHat
+    def step(self):
+        """Step the algorithm forward one step."""
+        num = self.img
+        FHat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
+        den = fft.fftshift(fft.ifft2(fft.ifftshift(FHat*self.otf)))
+        term1 = num / den
+        D = fft.fftshift(fft.fft2(fft.ifftshift(term1)))
+        Dprime = D * self.otfT
+        update = fft.fftshift(fft.ifft2(fft.ifftshift(Dprime)))
+        self.fHat = self.fHat * update
+        self.iter += 1
+        return self.fHat
