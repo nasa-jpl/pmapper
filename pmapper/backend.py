@@ -9,94 +9,20 @@ from scipy import ndimage, fft
 # https://github.com/brandondube/prysm/blob/master/LICENSE.md
 
 
-class NumpyEngine:
-    """An engine allowing an interchangeable backend for mathematical functions."""
-
-    def __init__(self, np=np):
-        """Create a new math engine.
-
-        Parameters
-        ----------
-        source : `module`
-            a python module.
-        """
-        self.numpy = np
+class BackendShim:
+    """A shim that allows a backend to be swapped at runtime."""
+    def __init__(self, src):
+        self._srcmodule = src
 
     def __getattr__(self, key):
-        """Get attribute.
+        if key == '_srcmodule':
+            return self._srcmodule
 
-        Parameters
-        ----------
-        key : `str`
-            attribute name
+        return getattr(self._srcmodule, key)
 
-        """
-        return getattr(self.numpy, key)
-
-
-class NDImageEngine:
-    """An engine which allows scipy.ndimage to be redirected to another lib at runtime."""
-
-    def __init__(self, ndimage=ndimage):
-        """Create a new scipy engine.
-
-        Parameters
-        ----------
-        ndimage : `module`
-            a python module, with the same API as scipy.ndimage
-        interpolate : `module`
-            a python module, with the same API as scipy.interpolate
-        special : `module`
-            a python module, with the same API as scipy.special
-
-        """
-        self.ndimage = ndimage
-
-    def __getattr__(self, key):
-        """Get attribute.
-
-        Parameters
-        ----------
-        key : `str`
-            attribute name
-
-        """
-        return getattr(self.ndimage, key)
-
-
-class FFTEngine:
-    """An engine which allows scipy.fft to be redirected to another lib at runtime."""
-
-    def __init__(self, fft=fft):
-        """Create a new scipy engine.
-
-        Parameters
-        ----------
-        fft : `module`
-            a python module, with the same API as scipy.fft
-        interpolate : `module`
-            a python module, with the same API as scipy.interpolate
-        special : `module`
-            a python module, with the same API as scipy.special
-
-        """
-        self.fft = fft
-
-    def __getattr__(self, key):
-        """Get attribute.
-
-        Parameters
-        ----------
-        key : `str`
-            attribute name
-
-        """
-        return getattr(self.fft, key)
-
-
-np = NumpyEngine()
-ndimage = NDImageEngine(ndimage)
-fft = FFTEngine(fft)
+np = BackendShim(np)
+ndimage = BackendShim(ndimage)
+fft = BackendShim(fft)
 
 
 # TODO: check if it is waste work to do the fft shifts, since ft_fwd and ft_rev
