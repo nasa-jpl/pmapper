@@ -39,31 +39,6 @@ while pmp.iter < len(imgs)*100:  # number of iterations
 Multi-frame PMAP cycles through the images and PSFs, so the total number of iterations "should" be an integer multiple of the number of source images.  In this way, each image is "visited" an equal number of times.
 
 
-## Bayer Imagery
-
-PMAP has a unique capability to produce trichromatic images from bayer cameras, without ever using a contemporary debayering algorithm (Malvar, AHD, etc).  Both ordinary PMAP and multi-frame PMAP can be used this way.  We will show the MF version in this example.  As in the docstring for `BayerMFPMAP`, imgs should be of shape (k, m, n) and "psfs" (s, k, a, b) with s == 4 (4 bayer planes).  We use two copies of the G psf, because we assume the two green channels are identical.
-```python
-import pmapper
-from pmapper.bayer import assemble_superresolved
-
-# imgs are "raw" and still color mosaiced;
-# white balance prescaling may be done but is not
-# required
-imgs = ...
-Rpsfs = ...
-Gpsfs = ...
-Bpsfs = ...
-pmp = pmapper.BayerMFPMAP(imgs, [Rpsfs, Gpsfs, Gpsfs, Bpsfs], cfa='rggb')  # "PMAP problem"
-while pmp.iter < len(imgs)*100:  # number of iterations
-    fHat = pmp.step()  # fHat is the object estimate
-
-rgb = assemble_superresolved(*fHat, pmp.zoomfactor, cfa='rggb')
-```
-
-Note that in this case fHat is not one image, but four; one for each raw bayer color plane (R, G1, G2, B).  The function `assemble_superresolved` properly registers the four color planes based on the amount of upsampling.  assemble_superresolved is not an "intelligent" algorithm and does the right thing, always, based only on the zoomfactor parameter.  The two green planes are averaged to preserve all possible SNR.
-
-If you did not perform white balance prescaling prior to iterating PMAP, you will want to do so to rgb, or the four planes of fHat prior to their assembly into the rgb output image.
-
 # GPU computing
 
 As mentioned previously, pmapper can be used trivially on a GPU.  To do so, simply execute the following modification:
@@ -78,9 +53,9 @@ from cupyx.scipy import (
     fft as cpfft
 )
 
-backend.np.numpy = cp
+backend.np._srcmodule = cp
 backend.fft.fft = cpfft
-backend.ndimage.ndimage = cpndimage
+backend.ndimage._srcmodule = cpndimage
 
 # if your data is not on the GPU already
 img = cp.array(img)
