@@ -99,6 +99,8 @@ ndimage = NDImageEngine(ndimage)
 fft = FFTEngine(fft)
 
 
+# TODO: check if it is waste work to do the fft shifts, since ft_fwd and ft_rev
+# are always used together
 def ft_fwd(a):
     """Forward Fourier transform.
 

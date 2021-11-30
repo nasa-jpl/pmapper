@@ -1,7 +1,7 @@
 """Several specialized implementations of the PMAP super-resolution algorithm."""
 
 from .backend import np, ft_fwd, ft_rev, ndimage
-from .bayer import decomposite_bayer
+from .bayer import decomposite_bayer, demosaic_malvar
 
 # If you wish to understand how PMAP works from this code, it is recommended
 # that you read :class:PMAP first.  MFPMAP is just PMAP that cycles through the
@@ -31,7 +31,7 @@ from .bayer import decomposite_bayer
 # the author's knowledge anyway.
 
 
-def pmap_core(fHat, g, H, Hstar, bufup=None, bufdown=None, prefilter=False, zoomfactor=1, invzoomfactor=1):
+def pmap_core(fHat, g, H, Hstar, bufup=None, bufdown=None, prefilter=False, zoomfactor=1):
     """Core routine of PMAP, produce a new object estimate.
 
     Parameters
@@ -40,6 +40,59 @@ def pmap_core(fHat, g, H, Hstar, bufup=None, bufdown=None, prefilter=False, zoom
         Nth object estimate, ndarray of shape (m, n)
     g : `numpy.ndarray`
         source image, ndarray of shape (a, b)
+    H : `numpy.ndarray`
+        OTF, complex ndarray of shape (m, n)
+    Hstar : `numpy.ndarray`
+        complex conjugate of H, ndarray of shape (m, n)
+    bufup : `numpy.ndarray`, optional
+        real-valued buffer for upsampled data, of shape (m, n)
+    bufdown : `numpy.ndarray`, optional
+        real-valued buffer for downsampled data, of shape (a, b)
+    prefilter : `bool`, optional
+        if True, use spline prefiltering
+        False is generally better at getting realistic image chain aliasing correct
+    zoomfactor : `float`, optional
+        ratio m/a
+
+    Returns
+    -------
+    fHat : `numpy.ndarray`
+        N+1th object estimate, ndarray of shape (m, n)
+
+    """
+    if zoomfactor == 1 and fHat.shape[0] != H.shape[0]:
+        raise ValueError(f'PMAP: zoom factor was given as 1, but fHat and OTF have unequal shapes {fHat.shape} and {H.shape}')  # NOQA
+
+    Fhat = ft_fwd(fHat)
+    denom = ft_rev(Fhat * H).real
+    # denom may be supre-resolved, i.e. have more pixels than g
+    # zoomfactor is the ratio of their sampling, the below does
+    # inline up and down scaling as denoted in Ref [1] Eq. 2.26
+    # re-assign denom and kernel, non-allocating invocation of zoom
+    if zoomfactor != 1:
+        denom = ndimage.zoom(denom, 1/zoomfactor, prefilter=prefilter, output=bufdown)
+        kernel = (g / denom) - 1
+        kernel = ndimage.zoom(kernel, zoomfactor, prefilter=prefilter, output=bufup)
+    else:
+        # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
+        kernel = (g / denom) - 1
+
+    R = ft_fwd(kernel)
+    grad = ft_rev(R * Hstar).real
+    fHat = fHat * np.exp(grad)
+    return fHat
+
+
+def pmap_core_typeIII_bayer(fHat):
+    """Core routine of PMAP, produce a new object estimate.
+
+    Parameters
+    ----------
+    fHat : `numpy.ndarray`
+        Nth object estimate, ndarray of shape (3, m, n)
+        3 is for 3 r,g,b color planes (post demosaic)
+    g : `numpy.ndarray`
+        source image, ndarray of shape (a, b); mosaiced
     H : `numpy.ndarray`
         OTF, complex ndarray of shape (m, n)
     Hstar : `numpy.ndarray`
@@ -62,27 +115,7 @@ def pmap_core(fHat, g, H, Hstar, bufup=None, bufdown=None, prefilter=False, zoom
         N+1th object estimate, ndarray of shape (m, n)
 
     """
-    if zoomfactor == 1 and fHat.shape[0] != H.shape[0]:
-        raise ValueError(f'PMAP: zoom factor was given as 1, but fHat and OTF have unequal shapes {fHat.shape} and {H.shape}')  # NOQA
-
-    Fhat = ft_fwd(fHat)
-    denom = ft_rev(Fhat * H).real
-    # denom may be supre-resolved, i.e. have more pixels than g
-    # zoomfactor is the ratio of their sampling, the below does
-    # inline up and down scaling as denoted in Ref [1] Eq. 2.26
-    # re-assign denom and kernel, non-allocating invocation of zoom
-    if zoomfactor != 1:
-        denom = ndimage.zoom(denom, invzoomfactor, prefilter=prefilter, output=bufdown)
-        kernel = (g / denom) - 1
-        kernel = ndimage.zoom(kernel, zoomfactor, prefilter=prefilter, output=bufup)
-    else:
-        # kernel is the expression { g/(f_n conv h) - 1 } from 2.16, J. J. Green's thesis
-        kernel = (g / denom) - 1
-
-    R = ft_fwd(kernel)
-    grad = ft_rev(R * Hstar).real
-    fHat = fHat * np.exp(grad)
-    return fHat
+    pass
 
 
 class PMAP:
@@ -97,7 +130,7 @@ class PMAP:
         Parameters
         ----------
         img : `numpy.ndarray`
-            image from the camera, ndarray of shape (n, m)
+            image from the camera, ndarray of shape (m, n)
         psf : `numpy.ndarray`
             psf corresponding to img, ndarray of shape (a, b)
         fhat : `numpy.ndarray`, optional
@@ -121,7 +154,6 @@ class PMAP:
         self.otfconj = np.conj(otf)
 
         self.zoomfactor = self.psf.shape[0] / self.img.shape[0]
-        self.invzoomfactor = 1 / self.zoomfactor
         self.prefilter = prefilter
 
         if fHat is None:
@@ -142,7 +174,7 @@ class PMAP:
         """
         self.fHat = pmap_core(self.fHat, self.img, self.otf, self.otfconj,
                               self.bufup, self.bufdown, self.prefilter,
-                              self.zoomfactor, self.invzoomfactor)
+                              self.zoomfactor)
         self.iter += 1
         return self.fHat
 
@@ -159,7 +191,7 @@ class BayerPMAP:
         Parameters
         ----------
         img : `numpy.ndarray`
-            image from the camera, ndarray of shape (n, m)
+            image from the camera, ndarray of shape (m, n)
         psfs : iterable of `numpy.ndarray`
             sequence of PSFs corresponding to img, ndarrays of shape (a, b) in
             the same order as the cfa string
@@ -175,6 +207,8 @@ class BayerPMAP:
 
         """
         self.imgs = decomposite_bayer(img, cfa)
+
+        psfs = np.array(psfs)
         self.psfs = psfs
         self.cfa = cfa
 
@@ -187,7 +221,6 @@ class BayerPMAP:
         self.otfsconj = [np.conj(otf) for otf in otfs]
 
         self.zoomfactor = self.psfs[0].shape[0] / self.imgs[0].shape[0]
-        self.invzoomfactor = 1 / self.zoomfactor
         self.prefilter = prefilter
 
         if fHats is None:
@@ -212,7 +245,7 @@ class BayerPMAP:
         for img, otf, otfconj, fHat in zip(self.imgs, self.otfs, self.otfsconj, self.fHats):
             fHat = pmap_core(fHat, img, otf, otfconj,
                              self.bufup, self.bufdown, self.prefilter,
-                             self.zoomfactor, self.invzoomfactor)
+                             self.zoomfactor)
             lcl_fHats.append(fHat)
 
         self.fHats = lcl_fHats
@@ -232,10 +265,10 @@ class MFPMAP:
         Parameters
         ----------
         imgs : `numpy.ndarray`
-            images from the camera, sequence of ndarray of shape (n, m).
+            images from the camera, sequence of ndarray of shape (m, n).
             The images must be fully co-registered before input to the algorithm.
-            A (k, n, m) shaped array iterates correctly, as does a list or other
-            iterable of (n, m) arrays
+            A (k, m, n) shaped array iterates correctly, as does a list or other
+            iterable of (m, n) arrays
         psfs : `iterable` of `numpy.ndarray`
             psfs corresponding to imgs, sequence of ndarray of shape (a, b)
         fhat : `numpy.ndarray`
@@ -255,6 +288,8 @@ class MFPMAP:
         memory overall, in exchange for slower iterations.
 
         """
+        imgs = np.array(imgs)
+        psfs = np.array(psfs)
         self.imgs = imgs
         self.psfs = psfs
 
@@ -267,7 +302,6 @@ class MFPMAP:
         self.otfsconj = [np.conj(otf) for otf in otfs]
 
         self.zoomfactor = self.psfs[0].shape[0] / self.imgs[0].shape[0]
-        self.invzoomfactor = 1 / self.zoomfactor
         self.prefilter = prefilter
 
         if fHat is None:
@@ -296,9 +330,9 @@ class MFPMAP:
         otf = self.otfs[i]
         img = self.imgs[i]
         otfconj = self.otfsconj[i]
-        self.fHat = pmap_core(self.fhat, img, otf, otfconj,
+        self.fHat = pmap_core(self.fHat, img, otf, otfconj,
                               self.bufup, self.bufdown, self.prefilter,
-                              self.zoomfactor, self.invzoomfactor)
+                              self.zoomfactor)
         self.iter += 1
         return self.fHat
 
@@ -308,20 +342,20 @@ class BayerMFPMAP:
 
     Implements Ref [1], Eq. 2.26, modified for use with Bayer imagery.
 
-    Does not demosaic the data, performs estimation on each interleaved plane
-    independently.
+    Incorporation of demosaicing and general handling of color is controlled by
+    the implementation argument of the constructor.
     """
 
-    def __init__(self, imgs, psfs, fHats=None, prefilter=False, cfa='rggb'):
+    def __init__(self, imgs, psfs, fHats=None, prefilter=False, cfa='rggb', implementation='I'):
         """Initialize a new PMAP problem.
 
         Parameters
         ----------
         imgs : `numpy.ndarray`
-            images from the camera, sequence of ndarray of shape (n, m).
+            images from the camera, sequence of ndarray of shape (m, n).
             The images must be fully co-registered before input to the algorithm.
-            A (k, n, m) shaped array iterates correctly, as does a list or other
-            iterable of (n, m) arrays
+            A (k, m, n) shaped array iterates correctly, as does a list or other
+            iterable of (m, n) arrays
         psfs : iterable of iterable of `numpy.ndarray`
             outer iteration is the color channel, inner iteration is the image.
             An ndarray of shape (s, k, a, b) iterates correctly.  The dimension
@@ -336,6 +370,21 @@ class BayerMFPMAP:
             resampling, else no input filter is used.  No pre-filtering is
             generally a best fit for image chain modeling and allows aliasing
             into the problem that would be present in a hardware system.
+        cfa : `str`, {'rggb', 'bggr'}
+            color filter array arrangement
+        implementation : `str`, {'I', 'II', 'III'}
+            what bayer PMAP implementation to use:
+            I:   never demosaic -- the raw color planes will be decomposited,
+                 and the algorithm will operate on r, g1, g2, b separately;
+                 returning each on each step() call.  For this implementation,
+                 provide [R, G1, G2, B] color planes for PSFs, or [B, G1, G2, R]
+                 for the bggr CFA order.
+            II:  demosaic once at the outset -- the raw data will be immediately
+                 demosaiced during init, and the r, g, b trichromatic planes will
+                 be used for PMAP iterations.  The camera's forward color matrix
+                 will still need to be applied to the final output data.
+            III: the data is demosaiced and re-mosaiced on each iteration.
+                 Malvar debayering is embedded within this version.
 
         Notes
         -----
@@ -343,17 +392,20 @@ class BayerMFPMAP:
         amount of memory.  The OTFs can be computed during each step to use less
         memory overall, in exchange for slower iterations.
 
-        The reconstruction is done on the color planes independently, without
-        debayering.  The caller must debayer the output estimate using e.g.
-        Malvar debayering.  This package includes an implementation of Malvar.
-
         """
-        self.imgs = np.array([decomposite_bayer(i, cfa) for i in imgs])
-        self.psfs = psfs
-        self.otfs = []
-        self.otfsconj = []
+        init_funcs = {
+            'I': self._init_typeI,
+            'II': self._init_typeII,
+            'III': self._init_typeIII
+        }
+        init_funcs[implementation.upper()](imgs, cfa)
+
         psfs = np.array(psfs)
         self.psfs = psfs
+
+        self.otfs = []
+        self.otfsconj = []
+
         for s in range(psfs.shape[0]):
             # lcl = local
             lcl_otfs = [ft_fwd(psf) for psf in psfs[s]]
@@ -366,9 +418,8 @@ class BayerMFPMAP:
             self.otfs.append(lcl_otfs)
             self.otfsconj.append(lcl_otfs_conj)
 
-        self.zoomfactor = self.psfs.shape[-1] / self.imgs.shape[-1]
-        self.invzoomfactor = 1 / self.zoomfactor
         self.prefilter = prefilter
+        self.zoomfactor = self.psfs.shape[-1] / self.imgs.shape[-1]
 
         if fHats is None:
             imgs = self.imgs[0]
@@ -384,18 +435,34 @@ class BayerMFPMAP:
         self.bufdown = np.empty(self.imgs.shape[-2:], dtype=self.imgs.dtype)
         self.iter = 0
 
-    def step(self):
+    def _init_typeI(self, imgs, cfa):
+        # do not demosaic.
+        #
+        # imgs come in as (k, m, n) with k img x (m,n) pixels
+        # after decomposite_bayer, will be (k, 4, m, n)
+        self.imgs = np.array([decomposite_bayer(i, cfa) for i in imgs])
+        self.step = self._step_typeI
+
+    def _init_typeII(self, imgs, cfa):
+        # demosaic at outset.
+        #
+        # imgs come in as (k, m, n) => (k, 3, m, n)
+        self.imgs = np.array([demosaic_malvar(i, cfa) for i in imgs])
+        self.imgs = np.moveaxis(self.imgs, 3, 1)
+        self.step = self._step_typeII
+
+    def _init_typeIII(self, imgs, cfa):
+        # demosaic at outset (will iteratively re-composite, etc, as PMAP
+        # evolves)
+        self.imgs = np.array([demosaic_malvar(i, cfa) for i in imgs])
+        self.step = self._step_typeIII
+
+    def _step_typeI(self):
         """Iterate the algorithm one step.
 
         Because this implementation cycles through the images, the steps can be
         thought of as mini-batches.  Intuitively, you may wish to make len(imgs)
         steps at a time.
-
-        Parameters
-        ----------
-        ret : `str`, optional, {'planes', 'mosaic'}
-            controls what is returned.  If planes, returns r, g1, g2, b each
-            of shape (a, b), else returns mosaiced planes of shape (2*a, 2*b)
 
         Returns
         -------
@@ -411,8 +478,57 @@ class BayerMFPMAP:
             img = imgs[i]
             otfconj = otfsconj[i]
             fHat = pmap_core(fHat, img, otf, otfconj,
-                             self.bufup, self.bufdown, self.prefiler,
-                             self.zoomfactor, self.invzoomfactor)
+                             self.bufup, self.bufdown, self.prefilter,
+                             self.zoomfactor)
+            lcl_fHats.append(fHat)
+
+        self.fHats = lcl_fHats
+        self.iter += 1
+        return self.fHats
+
+    def _step_typeII(self):
+        """Iterate the algorithm one step.
+
+        Because this implementation cycles through the images, the steps can be
+        thought of as mini-batches.  Intuitively, you may wish to make len(imgs)
+        steps at a time.
+
+        Returns
+        -------
+        fhats : iterable of `numpy.ndarray`
+            updated object estimates, of shape 4x (a, b)
+
+        """
+        # reader -- this is identical to typeI, because there is no structural
+        # difference between type I and II.
+        return self._step_typeI()
+
+    def _step_typeIII(self):
+        """Iterate the algorithm one step.
+
+        Because this implementation cycles through the images, the steps can be
+        thought of as mini-batches.  Intuitively, you may wish to make len(imgs)
+        steps at a time.
+
+        Returns
+        -------
+        fhats : iterable of `numpy.ndarray`
+            updated object estimates, of shape 4x (a, b)
+
+        """
+        # type III impl notes:
+        # images is 3 x k x m x n, 3 (r,g,b) color planes
+        # PMAP iterat
+        i = self.iter % self.imgs.shape[1]
+
+        lcl_fHats = []
+        for imgs, otfs, otfsconj, fHat in zip(self.imgs, self.otfs, self.otfsconj, self.fHats):
+            otf = otfs[i]
+            img = imgs[i]
+            otfconj = otfsconj[i]
+            fHat = pmap_core(fHat, img, otf, otfconj,
+                             self.bufup, self.bufdown, self.prefilter,
+                             self.zoomfactor)
             lcl_fHats.append(fHat)
 
         self.fHats = lcl_fHats

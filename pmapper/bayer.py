@@ -1,9 +1,9 @@
 """Basic operations for bayer data."""
-from .backend import np, ndimage
+from .backend import np, ndimage, fft
 
 top_left = (slice(0, None, 2), slice(0, None, 2))
-top_right = (slice(1, None, 2), slice(0, None, 2))
-bottom_left = (slice(0, None, 2), slice(1, None, 2))
+top_right = (slice(0, None, 2), slice(1, None, 2))
+bottom_left = (slice(1, None, 2), slice(0, None, 2))
 bottom_right = (slice(1, None, 2), slice(1, None, 2))
 
 ErrBadCFA = NotImplementedError('only rggb, bggr bayer patterns currently implemented')
@@ -168,6 +168,60 @@ def recomposite_bayer(r, g1, g2, b, cfa='rggb', output=None):
         raise ErrBadCFA
 
     return output
+
+
+def assemble_superresolved(r, g1, g2, b, zoomfactor, cfa='rggb', out=None):
+    """Assemble a trichromatic image from super-resolved color planes.
+
+    Parameters
+    ----------
+    r : `numpy.ndarray`
+        ndarray of shape (m, n) representing the R bayer color channel
+    g1 : `numpy.ndarray`
+        ndarray of shape (m, n) representing the G1 bayer color channel
+    g2 : `numpy.ndarray`
+        ndarray of shape (m, n) representing the G2 bayer color channel
+    b : `numpy.ndarray`
+        ndarray of shape (m, n) representing the B bayer color channel
+    zoomfactor : `float`
+        amount of upsampling applied, e.g. 500 => 1500; zoomfactor = 3
+    cfa : `str`, {'rggb', 'bggr'}
+        color filter arrangement
+    out : `numpy.ndarray`
+        array to place the output in, shape of (m,n,3)
+        if None, freshly allocated
+
+    Returns
+    -------
+    `numpy.ndarray`
+        array of shape (m, n, 3) containing the trichromatic image
+    """
+    if cfa == 'rggb':
+        g2_to_g1 = [-zoomfactor, zoomfactor]  # "up and over"
+        r_to_g1 = [-zoomfactor, 0]  # "over"
+        b_to_g1 = [0, zoomfactor]  # "up"
+    else:
+        raise NotImplementedError('assemble_superresolved: only rggb patterns supported at this time')
+
+    if out is None:
+        out = np.empty((*r.shape, 3), dtype=r.dtype)
+
+    R = fft.fft2(r)
+    B = fft.fft2(b)
+    G2 = fft.fft2(g2)
+    Rp = ndimage.fourier_shift(R, r_to_g1)
+    rp = fft.ifft2(Rp).real
+    Bp = ndimage.fourier_shift(B, b_to_g1)
+    bp = fft.ifft2(Bp).real
+    G2p = ndimage.fourier_shift(G2, g2_to_g1)
+    g2p = fft.ifft2(G2p).real
+    gp = (g2p+g1)/2
+
+    out[..., 0] = rp
+    out[..., 1] = gp
+    out[..., 2] = bp
+    return out
+
 
 # Kernels from Malvar et al, fig 2.
 # names derived from the paper,
