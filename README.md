@@ -54,7 +54,7 @@ from cupyx.scipy import (
 )
 
 backend.np._srcmodule = cp
-backend.fft.fft = cpfft
+backend.fft._srcmodule = cpfft
 backend.ndimage._srcmodule = cpndimage
 
 # if your data is not on the GPU already
