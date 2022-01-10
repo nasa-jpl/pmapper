@@ -1,6 +1,6 @@
 """Richardson-Lucy algorithm, implemented for comparison to PMAP."""
 
-from .backend import fft, np
+from .backend import np, ft_fwd, ft_rev
 
 
 class RichardsonLucy:
@@ -25,8 +25,11 @@ class RichardsonLucy:
         """
         self.img = img
         self.psf = psf
-        self.otf = fft.fftshift(fft.fft2(fft.ifftshift(psf)))
-        self.otfconj = np.conj(self.otf)
+        otf = ft_fwd(psf)
+        center = tuple(s // 2 for s in otf.shape)
+        otf /= otf[center]  # definition of OTF, normalize by DC
+        self.otf = otf
+        self.otfconj = np.conj(otf)
 
         if fHat is None:
             fHat = img
@@ -36,12 +39,12 @@ class RichardsonLucy:
     def step(self):
         """Step the algorithm forward one step."""
         num = self.img
-        FHat = fft.fftshift(fft.fft2(fft.ifftshift(self.fHat)))
-        den = fft.fftshift(fft.ifft2(fft.ifftshift(FHat*self.otf)))
+        FHat = ft_fwd(self.fHat)
+        den = ft_rev(FHat*self.otf)
         term1 = num / den
-        D = fft.fftshift(fft.fft2(fft.ifftshift(term1)))
-        Dprime = D * self.otfT
-        update = fft.fftshift(fft.ifft2(fft.ifftshift(Dprime)))
+        D = ft_fwd(term1)
+        Dprime = D * self.otfconj
+        update = ft_rev(Dprime)
         self.fHat = self.fHat * update
         self.iter += 1
         return self.fHat
