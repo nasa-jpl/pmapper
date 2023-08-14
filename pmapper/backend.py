@@ -32,12 +32,12 @@ def ft_fwd(a):
 
     Parameters
     ----------
-    a : `numpy.ndarray`
+    a : numpy.ndarray
         ndarray of shape (m, n)
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         complex-valued FT of shape (m, n)
 
     Notes
@@ -54,12 +54,12 @@ def ft_rev(a):
 
     Parameters
     ----------
-    a : `numpy.ndarray`
+    a : numpy.ndarray
         ndarray of shape (m, n)
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         complex-valued FT of shape (m, n)
 
     Notes

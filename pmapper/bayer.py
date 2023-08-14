@@ -14,17 +14,17 @@ def wb_prescale(mosaic, wr, wg1, wg2, wb, cfa='rggb'):
 
     Parameters
     ----------
-    mosaic : `numpy.ndarray`
+    mosaic : numpy.ndarray
         ndarray of shape (m, n), a float dtype
-    wr : `float`
+    wr : float
         red white balance prescalar
-    wg1 : `float`
+    wg1 : float
         G1 white balance prescalar
-    wg2 : `float`
+    wg2 : float
         G2 white balance prescalar
-    wb : `float`
+    wb : float
         blue white balance prescalar
-    cfa : `str`, optional, {'rggb', 'bggr'}
+    cfa : str, optional, {'rggb', 'bggr'}
         color filter arrangement
 
     """
@@ -48,22 +48,22 @@ def composite_bayer(r, g1, g2, b, cfa='rggb', output=None):
 
     Parameters
     ----------
-    r : `numpy.ndarray`
+    r : numpy.ndarray
         ndarray of shape (m, n)
-    g1 : `numpy.ndarray`
+    g1 : numpy.ndarray
         ndarray of shape (m, n)
-    g2 : `numpy.ndarray`
+    g2 : numpy.ndarray
         ndarray of shape (m, n)
-    b : `numpy.ndarray`
+    b : numpy.ndarray
         ndarray of shape (m, n)
-    cfa : `str`, optional, {'rggb', 'bggr'}
+    cfa : str, optional, {'rggb', 'bggr'}
         color filter arangement
-    output : `numpy.ndarray`, optional
+    output : numpy.ndarray, optional
         output array, of shape (m, n) and same dtype as r, g1, g2, b
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         array of interleaved data
 
     """
@@ -92,20 +92,20 @@ def decomposite_bayer(img, cfa='rggb'):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         composited ndarray of shape (m, n)
-    cfa : `str`, optional, {'rggb', 'bggr'}
+    cfa : str, optional, {'rggb', 'bggr'}
         color filter arangement
 
     Returns
     -------
-    r : `numpy.ndarray`
+    r : numpy.ndarray
         ndarray of shape (m//2, n//2)
-    g1 : `numpy.ndarray`
+    g1 : numpy.ndarray
         ndarray of shape (m//2, n//2)
-    g2 : `numpy.ndarray`
+    g2 : numpy.ndarray
         ndarray of shape (m//2, n//2)
-    b : `numpy.ndarray`
+    b : numpy.ndarray
         ndarray of shape (m//2, n//2)
 
     """
@@ -130,22 +130,22 @@ def recomposite_bayer(r, g1, g2, b, cfa='rggb', output=None):
 
     Parameters
     ----------
-    r : `numpy.ndarray`
+    r : numpy.ndarray
         ndarray of shape (m, n)
-    g1 : `numpy.ndarray`
+    g1 : numpy.ndarray
         ndarray of shape (m, n)
-    g2 : `numpy.ndarray`
+    g2 : numpy.ndarray
         ndarray of shape (m, n)
-    b : `numpy.ndarray`
+    b : numpy.ndarray
         ndarray of shape (m, n)
-    cfa : `str`, optional, {'rggb', 'bggr'}
+    cfa : str, optional, {'rggb', 'bggr'}
         color filter arangement
-    output : `numpy.ndarray`, optional
+    output : numpy.ndarray, optional
         output array, of shape (2m, 2n) and same dtype as r, g1, g2, b
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         array containing the re-composited color planes
 
     """
@@ -175,25 +175,25 @@ def assemble_superresolved(r, g1, g2, b, zoomfactor, cfa='rggb', out=None):
 
     Parameters
     ----------
-    r : `numpy.ndarray`
+    r : numpy.ndarray
         ndarray of shape (m, n) representing the R bayer color channel
-    g1 : `numpy.ndarray`
+    g1 : numpy.ndarray
         ndarray of shape (m, n) representing the G1 bayer color channel
-    g2 : `numpy.ndarray`
+    g2 : numpy.ndarray
         ndarray of shape (m, n) representing the G2 bayer color channel
-    b : `numpy.ndarray`
+    b : numpy.ndarray
         ndarray of shape (m, n) representing the B bayer color channel
-    zoomfactor : `float`
+    zoomfactor : float
         amount of upsampling applied, e.g. 500 => 1500; zoomfactor = 3
-    cfa : `str`, {'rggb', 'bggr'}
+    cfa : str, {'rggb', 'bggr'}
         color filter arrangement
-    out : `numpy.ndarray`
+    out : numpy.ndarray
         array to place the output in, shape of (m,n,3)
         if None, freshly allocated
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         array of shape (m, n, 3) containing the trichromatic image
     """
     if cfa == 'rggb':
@@ -272,15 +272,15 @@ def demosaic_malvar(img, cfa='rggb'):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         ndarray of shape (m, n) containing mosaiced (interleaved) pixel data,
         as from a raw file
-    cfa : `str`, optional, {'rggb', 'bggr'}
+    cfa : str, optional, {'rggb', 'bggr'}
         color filter arrangement
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         ndarray of shape (m, n, 3) that has been demosaiced.  Final dimension
         is ordered R, G, B.  Is of the same dtype as img and has the same energy
         content and sense of z scaling

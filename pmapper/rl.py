@@ -14,11 +14,11 @@ class RichardsonLucy:
 
         Parameters
         ----------
-        img : `numpy.ndarray`
+        img : numpy.ndarray
             image from the camera, ndarray of shape (n, m)
-        psf : `numpy.ndarray`
+        psf : numpy.ndarray
             psf corresponding to img, ndarray of shape (n, m)
-        fhat : `numpy.ndarray`, optional
+        fhat : numpy.ndarray, optional
             initial object estimate, ndarray of shape (n, m)
             if None, taken to be the img
 

@@ -14,9 +14,9 @@ def cropcenter(img, out_shape):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         ndarray of shape (m, n)
-    out_shape : `int` or `iterable` of int
+    out_shape : int or iterable of int
         shape to crop out, either a scalar or pair of values
 
     """
@@ -38,15 +38,15 @@ def padcenter(img, out_shape):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         ndarray of shape (m, n) of any dtype
-    out_shape : `int` or `iterable`
+    out_shape : int or iterable
         shape of the output array, either a or (a, b)
         if a, the output shape is (a, a); b==a
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         ndarray of the shape (a, b), made by padding img with zeros
 
     """
@@ -72,17 +72,17 @@ def pre_jjg(img, Q, guardband=None):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         ndarray of shape (m,n), any dtype.
         Floating point datatypes will have less quantization in the guardband.
-    Q : `float`
+    Q : float
         sampling factor; λF#/pp of the data in the image
-    guardband : `int`, optional
+    guardband : int, optional
         guardband (in px) to use; used to override automatic estimate
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         ndarray with a Fourier guardband and zero padding to square dimension
 
     """
@@ -105,17 +105,17 @@ def post_jjg(out, in_, oversampling):
 
     Parameters
     ----------
-    out : `numpy.ndarray`
+    out : numpy.ndarray
         output image
-    in_ : `numpy.ndarray`
+    in_ : numpy.ndarray
         input image (given to pre_jjg)
-    oversampling : `int`
+    oversampling : int
         integer oversampling factor; ratio of output to input shape in a larger
         PMAP routine
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         cropped output; shares memory with out
 
     """
@@ -131,16 +131,16 @@ def match_psf_and_data_sampling(img, psf, oversampling):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         ndarray of shape (m, n) containing image data
-    psf : `numpy.ndarray`
+    psf : numpy.ndarray
         ndarray of shape (a, b) containing PSF data
-    oversampling : `float`
+    oversampling : float
         oversampling of the PSF relative to the image
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         modified PSF such that the output (a, b) are equal to (oversampling * m, oversampling * n)
         The "modified" PSF may share memory with the input psf.
 

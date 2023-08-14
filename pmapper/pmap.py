@@ -36,27 +36,27 @@ def pmap_core(fHat, g, H, Hstar, bufup=None, bufdown=None, prefilter=False, zoom
 
     Parameters
     ----------
-    fHat : `numpy.ndarray`
+    fHat : numpy.ndarray
         Nth object estimate, ndarray of shape (m, n)
-    g : `numpy.ndarray`
+    g : numpy.ndarray
         source image, ndarray of shape (a, b)
-    H : `numpy.ndarray`
+    H : numpy.ndarray
         OTF, complex ndarray of shape (m, n)
-    Hstar : `numpy.ndarray`
+    Hstar : numpy.ndarray
         complex conjugate of H, ndarray of shape (m, n)
-    bufup : `numpy.ndarray`, optional
+    bufup : numpy.ndarray, optional
         real-valued buffer for upsampled data, of shape (m, n)
-    bufdown : `numpy.ndarray`, optional
+    bufdown : numpy.ndarray, optional
         real-valued buffer for downsampled data, of shape (a, b)
-    prefilter : `bool`, optional
+    prefilter : bool, optional
         if True, use spline prefiltering
         False is generally better at getting realistic image chain aliasing correct
-    zoomfactor : `float`, optional
+    zoomfactor : float, optional
         ratio m/a
 
     Returns
     -------
-    fHat : `numpy.ndarray`
+    fHat : numpy.ndarray
         N+1th object estimate, ndarray of shape (m, n)
 
     """
@@ -94,15 +94,15 @@ class PMAP:
 
         Parameters
         ----------
-        img : `numpy.ndarray`
+        img : numpy.ndarray
             image from the camera, ndarray of shape (m, n)
-        psf : `numpy.ndarray`
+        psf : numpy.ndarray
             psf corresponding to img, ndarray of shape (a, b)
-        fhat : `numpy.ndarray`, optional
+        fhat : numpy.ndarray, optional
             initial object estimate, ndarray of shape (a, b)
             if None, taken to be the img, rescaled if necessary to match PSF
             sampling
-        prefilter : `bool`, optional
+        prefilter : bool, optional
             if True, uses input stage filters when performing spline-based
             resampling, else no input filter is used.  No pre-filtering is
             generally a best fit for image chain modeling and allows aliasing
@@ -133,7 +133,7 @@ class PMAP:
 
         Returns
         -------
-        fhat : `numpy.ndarray`
+        fhat : numpy.ndarray
             updated object estimate, of shape (a, b)
 
         """
@@ -155,18 +155,18 @@ class MFPMAP:
 
         Parameters
         ----------
-        imgs : `numpy.ndarray`
+        imgs : numpy.ndarray
             images from the camera, sequence of ndarray of shape (m, n).
             The images must be fully co-registered before input to the algorithm.
             A (k, m, n) shaped array iterates correctly, as does a list or other
             iterable of (m, n) arrays
-        psfs : `iterable` of `numpy.ndarray`
+        psfs : iterable of numpy.ndarray
             psfs corresponding to imgs, sequence of ndarray of shape (a, b)
-        fhat : `numpy.ndarray`
+        fhat : numpy.ndarray
             initial object estimate, ndarray of shape (a, b)
             if None, taken to be the first img rescaled if necessary to match
             PSF sampling
-        prefilter : `bool`, optional
+        prefilter : bool, optional
             if True, uses input stage filters when performing spline-based
             resampling, else no input filter is used.  No pre-filtering is
             generally a best fit for image chain modeling and allows aliasing
@@ -212,7 +212,7 @@ class MFPMAP:
 
         Returns
         -------
-        fhat : `numpy.ndarray`
+        fhat : numpy.ndarray
             updated object estimate, of shape (a, b)
 
         """
